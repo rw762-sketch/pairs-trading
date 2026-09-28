@@ -1,0 +1,23 @@
+{
+  "report_name": "correlation-screen",
+  "stocks_used": 495,
+  "timestamp": "2026-09-18T16:14:59.939656-04:00",
+  "timestamp_source": "Original results file modification time; the exact run start was not recorded.",
+  "files": [
+    {
+      "original_path": "output/pair-research/correlated-pairs.md",
+      "new_name": "2026-09-18_16-14-59_correlation-screen_495-stocks_report.md",
+      "original_sha256": "90f5074155b033a353bd1e04e48321b3fe58e44419409b2cb15615a300c87d9c"
+    },
+    {
+      "original_path": "output/pair-research/screening-results.json",
+      "new_name": "2026-09-18_16-14-59_correlation-screen_495-stocks_results.json",
+      "original_sha256": "3b4062b39609870521abc6c99814c7ce79fc3dc4dc47e9e54e8be10082ddece1"
+    },
+    {
+      "original_path": "output/pair-research/strategy-proposals.md",
+      "new_name": "2026-09-18_16-14-59_correlation-screen_495-stocks_strategies.md",
+      "original_sha256": "34fbd81fb2b8202702aaddd6e40f057faef25bf5855c30e98ee5b7030dc2bc3f"
+    }
+  ]
+}
