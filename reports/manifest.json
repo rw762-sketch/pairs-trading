@@ -1,0 +1,194 @@
+{
+  "created_at": "2026-10-05T22:11:11.772473-04:00",
+  "scope": "Compact historical evidence; no raw price snapshots, private home paths or full acquisition plans included.",
+  "official_run": "selected-2025-2026",
+  "all_evaluations_retrospective": true,
+  "runs": [
+    {
+      "id": "selected-2025-2026",
+      "source_directory": "results/2026-10-05_21-26-14",
+      "trading_start": "2025-09-17",
+      "trading_end": "2026-09-17",
+      "selected_pairs": 3,
+      "metrics": {
+        "net_total_return": 0.0390081303662568,
+        "gross_total_return": 0.05783536604798733,
+        "net_cagr": 0.0390353630815949,
+        "max_drawdown": -0.0226912519919548,
+        "num_trades": 22,
+        "gross_pnl": 5783.536604798733,
+        "net_pnl": 3900.813036625611,
+        "total_costs": 1882.7235681731229
+      },
+      "provenance": {
+        "source_plan_filename": "results/2026-10-05_21-26-14/plan.json",
+        "source_plan_sha256": "7fb3dd4e419a8858e556d89bf7e3ce0d949905dc5ea38b740e76acb914222279",
+        "price_snapshot_sha256": "2cd8f34598beded9c2ea6d6ad79a4fadd3b594dc6a448483e05959b49192c360"
+      },
+      "files": [
+        {
+          "path": "selected-2025-2026/performance.csv",
+          "source_filename": "results/2026-10-05_21-26-14/performance.csv",
+          "sha256": "c70cc21ea210744db71d61b640e736f38d79b7195495ff80e67ad950220fc5ce",
+          "bytes": 527
+        },
+        {
+          "path": "selected-2025-2026/allocation.csv",
+          "source_filename": "results/2026-10-05_21-26-14/allocation.csv",
+          "sha256": "c0ca806c14f79dcf6489b4817d363eb25060a8aa466ce6fbfcdc382f3c1def8c",
+          "bytes": 255
+        },
+        {
+          "path": "selected-2025-2026/selected-pairs.csv",
+          "source_filename": "results/2026-10-05_21-26-14/selected-pairs.csv",
+          "sha256": "b5ae9d021d0cafcef74fb27d9f947e8ea5c7bea213ad4caf0e1c17fb8249b54e",
+          "bytes": 884
+        },
+        {
+          "path": "selected-2025-2026/trades.csv",
+          "source_filename": "results/2026-10-05_21-26-14/trades.csv",
+          "sha256": "8a3d0e17fb8909c3c7ac18f73ec6055f7d8459ba1a334b2e64daf6edf9a60486",
+          "bytes": 9837
+        },
+        {
+          "path": "selected-2025-2026/pair-metrics.csv",
+          "source_filename": "results/2026-10-05_21-26-14/pair-metrics.csv",
+          "sha256": "777d4242ff1266b4f915e336849bc9f0c2edb9717de4165c589f7ce49c052c13",
+          "bytes": 1287
+        },
+        {
+          "path": "selected-2025-2026/equity.csv",
+          "source_filename": "results/2026-10-05_21-26-14/equity.csv",
+          "sha256": "da1b0325504e9c6b28aa6cc2cd8c53e7970117e3c3e0e8363ae4f2e11f791ff2",
+          "bytes": 7492
+        },
+        {
+          "path": "selected-2025-2026/cumulative-return.png",
+          "source_filename": "results/2026-10-05_21-26-14/cumulative-return.png",
+          "sha256": "ab59943b9985492663e5c524b21076145021a7d5db3636e1289348aa917220b6",
+          "bytes": 61725
+        }
+      ]
+    },
+    {
+      "id": "historical-2021",
+      "source_directory": "results/2021_2026-10-05_21-37-29",
+      "trading_start": "2021-01-04",
+      "trading_end": "2021-12-31",
+      "selected_pairs": 6,
+      "metrics": {
+        "net_total_return": 0.009961733729763,
+        "gross_total_return": 0.029201650319928153,
+        "net_cagr": 0.0100796008518646,
+        "max_drawdown": -0.0412454178953179,
+        "num_trades": 40,
+        "gross_pnl": 2920.1650319928153,
+        "net_pnl": 996.1733729762664,
+        "total_costs": 1923.9916590165483
+      },
+      "provenance": {
+        "source_plan_filename": "results/2021_2026-10-05_21-37-29/plan.json",
+        "source_plan_sha256": "554b21050a7ca29b5852570220ef7eb8f567f873cfdbe619fd3b42ac0bdb5519",
+        "price_snapshot_sha256": "e147d687fae0e3f9a558c19af3d3c8b6c96822a32e01037ee723bc00c1af7aa7",
+        "strategy_sha256": "8fffb0bee136ca8e88f59be71cc128538bc91f40971199187047baefcf209641",
+        "verification_filename": "results/2021_2026-10-05_21-37-29/verification.json",
+        "verification_sha256": "0bf1d52ab6ce0828c89aa602bb9ab7b25f6c726dfafef981049f5399302e7cf7"
+      },
+      "files": [
+        {
+          "path": "historical-2021/performance.csv",
+          "source_filename": "results/2021_2026-10-05_21-37-29/performance.csv",
+          "sha256": "18c7fb29af871efba50b4b1efc106fa4690bc7702ea705029d6e13e09109411e",
+          "bytes": 620
+        },
+        {
+          "path": "historical-2021/allocation.csv",
+          "source_filename": "results/2021_2026-10-05_21-37-29/allocation.csv",
+          "sha256": "23018bb6cb7d45628e2d2ca92536910141ab103e336366886c058824f0c03a7e",
+          "bytes": 452
+        },
+        {
+          "path": "historical-2021/selected-pairs.csv",
+          "source_filename": "results/2021_2026-10-05_21-37-29/selected-pairs.csv",
+          "sha256": "425a93f28e251cf7a2dd2bdafd36266aed8375f4f70bef5c167e851e352c65ff",
+          "bytes": 1660
+        },
+        {
+          "path": "historical-2021/trades.csv",
+          "source_filename": "results/2021_2026-10-05_21-37-29/trades.csv",
+          "sha256": "c803bd62f9f516b5083a9044df55a50ae2e6f581a35fd536422bf30e5704bd46",
+          "bytes": 17635
+        },
+        {
+          "path": "historical-2021/pair-metrics.csv",
+          "source_filename": "results/2021_2026-10-05_21-37-29/pair-metrics.csv",
+          "sha256": "ac2f68db754bbb87663ecc4327b761f671a3c40912fc4f74ff6fa4c0df16301e",
+          "bytes": 2275
+        },
+        {
+          "path": "historical-2021/equity.csv",
+          "source_filename": "results/2021_2026-10-05_21-37-29/equity.csv",
+          "sha256": "233b5d582339d369d362d091b41b26d41fb3e6c9b0ea02c172e23f75a67a8ad7",
+          "bytes": 7534
+        }
+      ]
+    },
+    {
+      "id": "ten-year-preview",
+      "source_directory": "tmp/ten-year-preview/10-year_2026-10-05_21-50-24",
+      "trading_start": "2024-09-18",
+      "trading_end": "2026-09-17",
+      "selected_pairs": 2,
+      "metrics": {
+        "net_total_return": 0.0845393057193619,
+        "gross_total_return": 0.11708941918441668,
+        "net_cagr": 0.0414991233504775,
+        "max_drawdown": -0.0496118189523888,
+        "num_trades": 22,
+        "gross_pnl": 11708.941918441667,
+        "net_pnl": 8453.930571936202,
+        "total_costs": 3255.0113465054665
+      },
+      "provenance": {
+        "source_plan_filename": "tmp/ten-year-preview/10-year_2026-10-05_21-50-24/plan.json",
+        "source_plan_sha256": "17e8d12a878c4dc3bbc27e72df42b0da29cd7a73cb06aa96bc3f7f23ba4d79ae",
+        "price_snapshot_sha256": "cdbf224dd9061ad7b21beab985d90dfbc3e7f7dd177c34ab939968e88119711e",
+        "verification_filename": "tmp/ten-year-preview/10-year_2026-10-05_21-50-24/verification.json",
+        "verification_sha256": "b21e0ac87d5cb650ff0a0ddabd1ac7b57ae20d85246a7f13dbd232b0e0d6ada5"
+      },
+      "files": [
+        {
+          "path": "ten-year-preview/performance.csv",
+          "source_filename": "tmp/ten-year-preview/10-year_2026-10-05_21-50-24/performance.csv",
+          "sha256": "7aa93af3ba214f7d4f7ca30f6cc08832edcf828a81cfa18c01cfdc8b2380b5f9",
+          "bytes": 543
+        },
+        {
+          "path": "ten-year-preview/allocation.csv",
+          "source_filename": "tmp/ten-year-preview/10-year_2026-10-05_21-50-24/allocation.csv",
+          "sha256": "e582c37333c0464c352c8c26987e747fb6d3189173e031b0c390a6c522d38aa4",
+          "bytes": 181
+        },
+        {
+          "path": "ten-year-preview/pair-metrics.csv",
+          "source_filename": "tmp/ten-year-preview/10-year_2026-10-05_21-50-24/pair-metrics.csv",
+          "sha256": "4f0bc3a772bbe37c7eb6f8e9bb947d0f9b8fe976303f251498ab40787698095d",
+          "bytes": 944
+        }
+      ]
+    }
+  ],
+  "code_snapshot_sha256": {
+    "selected_strategy.json": "8fffb0bee136ca8e88f59be71cc128538bc91f40971199187047baefcf209641",
+    "allocation.py": "f6e7fd027c0b942c581c50d6547234fce9305f188366b73f3987bf522ba89eae",
+    "run_selected.py": "0bd43acf5c2e18d4fc2990318d3428e2775876158124a5a9f8bda6ca3c65c043",
+    "signal_generation.py": "f403d62f3d93dcaf670b11614a6107836d2793a0f6112b65727653c4cb68d2fa",
+    "backtester.py": "cf70a847d41e53b12b09a3c1480deea07e18d7c3dddff59175674a3f686404c5",
+    "evaluation.py": "a556a9a43f004c0c5cc1a6181b37572475e3708bbeb489c680c502ab12d547dc",
+    "stock_clustering.py": "589766b8773b8da44a4c63336a52807004d12e783e41de08e81a8f995dede32a",
+    "cointegration.py": "13f4b942aca5ff4b01118879961329f133dd22031dac5e0bda93c91e3a1d2f1c",
+    "selection.py": "a81f1c0934df185c0d7c48239e5d4f71e748ca3aa92f725993c004f7c9c655ef",
+    "run_historical_year.py": "eb6b31ad19b4d2a4cc2f0693abda019e278384358e895b9f87fc1ba1b2621b9c"
+  },
+  "official_frozen_inputs_directory": "reproducibility/selected"
+}

@@ -1,324 +1,239 @@
-"""Prespecified, monthly walk-forward comparison on a fixed peer-stock universe.
+"""Non-overlapping chronological trading windows with fresh training-only screens."""
 
-All model selection sees preceding formation observations only. The same fixed
-same-industry/different-issuer hypothesis family is recorded in every window.
-Each variant liquidates at every window end and carries its account capital
-forward. This is a research comparison; no variant is chosen by its final return.
-"""
-
-from itertools import combinations
-import warnings
-
+from dataclasses import asdict, replace
+from datetime import datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
+import hashlib, json
 import numpy as np
 import pandas as pd
-from statsmodels.stats.multitest import multipletests
-from statsmodels.tsa.stattools import adfuller, coint
-
-from backtester import (PairBacktester, TRADE_COLUMNS, combine_portfolio_results,
-                        performance_metrics)
-from signal_generation import PairSignalGenerator
-
-VARIANT_NAMES = ('fixed_selection', 'monthly_raw', 'monthly_holm')
-SCREEN_COLUMNS = [
-    'Pair', 'Ticker1', 'Ticker2', 'Industry', 'Raw_P', 'Correction_Input_P',
-    'Adjusted_P', 'Beta', 'Alpha', 'I1Compatible', 'Raw_Eligible', 'Holm_Eligible',
-    'Test_Status', 'Test_Error', 'Correction_Input_Is_Placeholder', 'Family_Size',
-    'Level_ADF_P1', 'Diff_ADF_P1', 'Level_ADF_P2', 'Diff_ADF_P2',
-]
-PAIR_PROFIT_COLUMNS = ['Pair', 'Net_PnL', 'Num_Trades', 'Costs', 'Selected_Windows']
+from threadpoolctl import threadpool_limits
+from backtester import TRADE_COLUMNS, performance_metrics
+from cointegration import screen_pairs
+from evaluation import evaluate_pairs
+from selection import apply_filters
+from stock_clustering import cluster_stocks, within_cluster_pairs
+from reporting import write_walk_forward_report
 
 
-def _metadata_frame(metadata):
-    if isinstance(metadata, pd.DataFrame):
-        frame = metadata.copy()
-    elif isinstance(metadata, dict):
-        frame = pd.DataFrame([dict(value, **{'Yahoo ticker': key})
-                              for key, value in metadata.items()])
-    else:
-        frame = pd.DataFrame(metadata)
-    ticker_column = next((key for key in ('Yahoo ticker', 'Ticker', 'ticker', 'Symbol') if key in frame), None)
-    industry_column = next((key for key in ('GICS Sub-Industry', 'Industry', 'industry') if key in frame), None)
-    if ticker_column is None or industry_column is None or 'CIK' not in frame:
-        raise ValueError('Metadata must identify each ticker, its GICS sub-industry, and issuer CIK')
-    if frame[[ticker_column, industry_column, 'CIK']].isna().any().any():
-        raise ValueError('Ticker, industry, and issuer metadata must be complete before testing')
-    frame = frame.rename(columns={ticker_column: 'Ticker', industry_column: 'Industry'})
-    frame['Ticker'] = frame.Ticker.astype(str).str.replace('.', '-', regex=False)
-    frame['Industry'] = frame.Industry.astype(str).str.strip()
-    frame['CIK'] = frame.CIK.map(lambda value: str(int(value)))
-    if frame.Ticker.duplicated().any() or (frame.Ticker.str.len() == 0).any() or (frame.Industry.str.len() == 0).any():
-        raise ValueError('Metadata must contain unique tickers and nonempty industries')
-    return frame.sort_values('Ticker').reset_index(drop=True)
+def schedule_windows(index, formation=252, trading_window=126):
+    if (
+        not isinstance(index, pd.DatetimeIndex)
+        or not index.is_unique
+        or not index.is_monotonic_increasing
+    ):
+        raise ValueError("Dates must be unique and chronological.")
+    if formation < 3 or trading_window < 2 or len(index) <= formation:
+        raise ValueError("Insufficient formation/trading history.")
+    return [
+        (
+            index[start - formation : start],
+            index[start : min(start + trading_window, len(index))],
+        )
+        for start in range(formation, len(index), trading_window)
+    ]
 
 
-def prescribe_pair_family(metadata):
-    """Fix peer combinations from metadata before inspecting any test p-values."""
-    stocks = _metadata_frame(metadata)
-    rows = []
-    for a, b in combinations(stocks.itertuples(), 2):
-        if a.Industry == b.Industry and a.CIK != b.CIK:
-            rows.append({'Pair': f'{a.Ticker}-{b.Ticker}', 'Ticker1': a.Ticker,
-                         'Ticker2': b.Ticker, 'Industry': a.Industry})
-    return pd.DataFrame(rows, columns=['Pair', 'Ticker1', 'Ticker2', 'Industry'])
+def exclude_previous_losses(selected, previous_losses, max_weight):
+    """Drop unordered pairs with negative net P&L in only the preceding window."""
+    result = selected.copy()
+    result["Previous_Window_Loser"] = [
+        tuple(sorted((r.Ticker1, r.Ticker2))) in previous_losses
+        for r in result.itertuples()
+    ]
+    eligible = result.loc[~result.Previous_Window_Loser].copy()
+    eligible["Weight"] = min(1 / len(eligible), max_weight) if len(eligible) else 0.0
+    return eligible, result
 
 
-def holm_correction(raw_pvalues, testable=None, alpha=.05):
-    """Holm correction over the complete prescribed family.
-
-    Untested hypotheses contribute a conservative input of 1.0. Their observed
-    raw p-value remains missing in the screening table; the placeholder is never
-    presented as a measured statistical result. The returned adjusted values
-    belong to this full-family correction, including the explicit placeholders.
-    """
-    raw = np.asarray(raw_pvalues, dtype=float)
-    valid = np.isfinite(raw) if testable is None else np.asarray(testable, dtype=bool)
-    if raw.ndim != 1 or valid.shape != raw.shape:
-        raise ValueError('Raw p-values and testable mask must be matching vectors')
-    if not 0 < alpha < 1:
-        raise ValueError('alpha must lie strictly between zero and one')
-    if (valid & (~np.isfinite(raw) | (raw < 0) | (raw > 1))).any():
-        raise ValueError('Observed testable p-values must be finite and within [0, 1]')
-    correction_input = np.where(valid, raw, 1.0)
-    if len(raw):
-        reject, adjusted, _, _ = multipletests(correction_input, alpha=alpha, method='holm')
-    else:
-        reject, adjusted = np.array([], dtype=bool), np.array([], dtype=float)
-    return {'correction_input': correction_input, 'adjusted': adjusted,
-            'reject': reject & valid, 'is_placeholder': ~valid}
+def previous_window_losers(trades):
+    if trades.empty:
+        return set()
+    grouped = trades.groupby(["Ticker1", "Ticker2"]).Net_PnL.sum()
+    # Net_PnL already includes fees and short borrowing.
+    totals = {}
+    for (a, b), value in grouped.items():
+        key = tuple(sorted((a, b)))
+        totals[key] = totals.get(key, 0.0) + value
+    return {key for key, value in totals.items() if value < 0}
 
 
-def screen_formation(formation, pair_family, alpha=.05):
-    """Test only the supplied formation observations, retaining every hypothesis."""
-    if len(formation) < 30:
-        raise ValueError('Formation needs at least 30 historical observations')
-    diagnostics = {}
-    for ticker in sorted(set(pair_family.Ticker1) | set(pair_family.Ticker2)):
-        values = formation[ticker].to_numpy(dtype=float)
-        level = difference = np.nan
-        error = ''
-        if not np.isfinite(values).all() or (values <= 0).any():
-            error = 'Formation contains missing, nonfinite or nonpositive prices'
-        else:
-            try:
-                with warnings.catch_warnings():
-                    warnings.simplefilter('ignore', FutureWarning)
-                    level = float(adfuller(values, regression='c', autolag='AIC')[1])
-                    difference = float(adfuller(np.diff(values), regression='c', autolag='AIC')[1])
-            except (ValueError, np.linalg.LinAlgError) as exc:
-                error = str(exc)
-        compatible = bool(np.isfinite(level) and np.isfinite(difference) and level >= alpha and difference < alpha)
-        diagnostics[ticker] = {'level': level, 'difference': difference, 'compatible': compatible, 'error': error}
-    rows = []
-    for pair in pair_family.itertuples():
-        da, db = diagnostics[pair.Ticker1], diagnostics[pair.Ticker2]
-        compatible = da['compatible'] and db['compatible']
-        raw = beta = intercept = np.nan
-        status = 'not_tested_i1_incompatible'
-        error = '; '.join(value for value in (da['error'], db['error']) if value)
-        if error:
-            status = 'not_tested_invalid_formation'
-        elif compatible:
-            try:
-                a = formation[pair.Ticker1].to_numpy(dtype=float)
-                b = formation[pair.Ticker2].to_numpy(dtype=float)
-                intercept, beta = np.linalg.lstsq(np.column_stack([np.ones(len(b)), b]), a, rcond=None)[0]
-                with warnings.catch_warnings(record=True) as caught:
-                    warnings.simplefilter('always')
-                    raw = float(coint(a, b, trend='c', autolag='AIC')[1])
-                if not np.isfinite(raw) or not np.isfinite(beta):
-                    raise ValueError('Nonfinite cointegration result or hedge ratio')
-                status = 'tested'
-                error = '; '.join(str(w.message) for w in caught)
-            except (ValueError, np.linalg.LinAlgError) as exc:
-                status, error, raw = 'test_error', str(exc), np.nan
-        rows.append({
-            'Pair': pair.Pair, 'Ticker1': pair.Ticker1, 'Ticker2': pair.Ticker2,
-            'Industry': pair.Industry, 'Raw_P': raw, 'Beta': beta, 'Alpha': intercept,
-            'I1Compatible': compatible, 'Test_Status': status, 'Test_Error': error,
-            'Level_ADF_P1': da['level'], 'Diff_ADF_P1': da['difference'],
-            'Level_ADF_P2': db['level'], 'Diff_ADF_P2': db['difference'],
-        })
-    frame = pd.DataFrame(rows).reindex(columns=SCREEN_COLUMNS)
-    observed = frame.Test_Status.eq('tested').to_numpy()
-    correction = holm_correction(frame.Raw_P.to_numpy(dtype=float), observed, alpha)
-    frame['Correction_Input_P'] = correction['correction_input']
-    frame['Adjusted_P'] = correction['adjusted']
-    frame['Correction_Input_Is_Placeholder'] = correction['is_placeholder']
-    frame['Family_Size'] = len(pair_family)
-    frame['Raw_Eligible'] = observed & (frame.Raw_P < alpha) & (frame.Beta > 0)
-    frame['Holm_Eligible'] = correction['reject'] & (frame.Beta > 0)
-    return frame
-
-
-def _window_backtest(prices, dates, selected, capital, entry, exit,
-                     lookback, fee, borrow, max_hold):
-    """One flat-to-flat month with a causal warmup and one total capital budget."""
-    if selected.empty:
-        curve = pd.Series(capital, index=dates, name='Portfolio_Value', dtype=float)
-        trades = pd.DataFrame(columns=TRADE_COLUMNS + ['Portfolio_Weight'])
-        return {'equity_curve': curve, 'trades': trades,
-                'metrics': performance_metrics(curve, trades, capital)}
-    # Cut the history at this month's end; no signal can inspect a later month.
-    history = prices.loc[:dates[-1]].tail(len(dates) + lookback)
-    results = {}
-    for row in selected.itertuples():
-        generator = PairSignalGenerator(history, row.Ticker1, row.Ticker2,
-                                         hedge_ratio=row.Beta, lookback=lookback)
-        generator.calculate_zscore()
-        for attribute in ('price_data', 'spread', 'z_score', 'moving_mean', 'moving_std'):
-            setattr(generator, attribute, getattr(generator, attribute).loc[dates])
-        signals = generator.get_signals(entry_threshold=entry, exit_threshold=exit)
-        engine = PairBacktester(signals, initial_capital=capital, transaction_cost=fee,
-                                max_holding_period=max_hold, annual_borrow_rate=borrow)
-        curve = engine.run_backtest()
-        if len(curve) and curve.Gross_Exposure.iloc[-1] != 0:
-            raise AssertionError('Window must finish with both legs liquidated')
-        results[row.Pair] = {'equity_curve': curve, 'trades': engine.get_trades_dataframe(),
-                             'metrics': engine.get_performance_metrics(), 'initial_capital': capital}
-    combined = combine_portfolio_results(results, initial_capital=capital)
-    if not np.isclose(combined['trades'].Net_PnL.sum(), combined['equity_curve'].iloc[-1] - capital,
-                      rtol=1e-10, atol=1e-7):
-        raise AssertionError('Allocated trade P&L must reconcile to the monthly account')
-    return combined
-
-
-def run_experiment(prices, metadata, evaluation_start='2025-10-23', formation_days=252,
-                   initial_capital=100000, entry=2, exit=.5, lookback=60,
-                   fee=.001, borrow=.02, max_hold=20):
-    """Compare three prescribed selection variants, without fitting to outcomes.
-
-    ``prices`` must include prior formation/warmup data and evaluation dates;
-    ``metadata`` fixes the stock universe, peer industries and issuer identities.
-    The fixed variant uses the first formation's raw selection and betas forever.
-    The other two reselect/refit each calendar month using the preceding window.
-    All variants close positions each month for a matched selection comparison.
-    """
-    if not isinstance(prices.index, pd.DatetimeIndex) or prices.index.hasnans or not prices.index.is_unique or not prices.index.is_monotonic_increasing:
-        raise ValueError('Prices require finite, unique, chronologically sorted dates')
-    if prices.columns.duplicated().any():
-        raise ValueError('Price tickers must be unique')
-    for name, value, minimum in [('formation_days', formation_days, 30), ('lookback', lookback, 2)]:
-        if not isinstance(value, (int, np.integer)) or isinstance(value, bool) or value < minimum:
-            raise ValueError(f'{name} must be an integer >= {minimum}')
-    if not np.isfinite(initial_capital) or initial_capital <= 0:
-        raise ValueError('initial_capital must be finite and positive')
-    if not np.isfinite(entry) or not np.isfinite(exit) or not 0 <= exit < entry:
-        raise ValueError('Require 0 <= exit < entry')
-    if not np.isfinite(fee) or fee < 0 or not np.isfinite(borrow) or borrow < 0:
-        raise ValueError('Fee and borrowing assumptions must be finite and nonnegative')
-    if max_hold is not None and (not isinstance(max_hold, (int, np.integer)) or isinstance(max_hold, bool) or max_hold < 1):
-        raise ValueError('max_hold must be a positive integer of trading bars')
-    stocks = _metadata_frame(metadata)
-    missing = set(stocks.Ticker) - set(prices.columns)
-    if missing:
-        raise ValueError(f'Prices missing universe tickers: {sorted(missing)}')
-    prices = prices.loc[:, stocks.Ticker].astype(float).copy()
-    family = prescribe_pair_family(metadata)
-    start = pd.Timestamp(evaluation_start)
-    if prices.index.tz is not None and start.tzinfo is None:
-        start = start.tz_localize(prices.index.tz)
-    evaluation_dates = prices.index[prices.index >= start]
-    if len(evaluation_dates) == 0:
-        raise ValueError('No evaluation observations on or after evaluation_start')
-    first_row = prices.index.get_loc(evaluation_dates[0])
-    if first_row < max(formation_days, lookback):
-        raise ValueError('Insufficient preceding data for formation and signal warmup')
-    month_keys = evaluation_dates.strftime('%Y-%m')
-    windows = [evaluation_dates[month_keys == key] for key in dict.fromkeys(month_keys)]
-    all_screening, scheduled = [], []
-    variant_storage = {name: {'curves': [], 'logs': [], 'monthly': [], 'selected_counts': {},
-                              'capital': float(initial_capital)} for name in VARIANT_NAMES}
-    frozen_selection = None
-    first_formation_start = first_formation_end = None
-    for number, dates in enumerate(windows, start=1):
-        first_trade_row = prices.index.get_loc(dates[0])
-        formation = prices.iloc[first_trade_row - formation_days:first_trade_row]
-        if len(formation) != formation_days or formation.index[-1] >= dates[0]:
-            raise AssertionError('Formation must contain only strictly earlier observations')
-        panel = screen_formation(formation, family)
-        panel['Window'] = number
-        panel['Formation_Start'] = formation.index[0]
-        panel['Formation_End'] = formation.index[-1]
-        panel['Trading_Start'] = dates[0]
-        panel['Trading_End'] = dates[-1]
-        all_screening.append(panel)
-        scheduled.append({'Window': number, 'Formation_Start': formation.index[0].isoformat(),
-                          'Formation_End': formation.index[-1].isoformat(),
-                          'Trading_Start': dates[0].isoformat(), 'Trading_End': dates[-1].isoformat()})
-        if frozen_selection is None:
-            frozen_selection = panel.loc[panel.Raw_Eligible].copy()
-            first_formation_start, first_formation_end = formation.index[0], formation.index[-1]
-        selections = {'fixed_selection': frozen_selection,
-                      'monthly_raw': panel.loc[panel.Raw_Eligible],
-                      'monthly_holm': panel.loc[panel.Holm_Eligible]}
-        for name, selected in selections.items():
-            storage = variant_storage[name]
-            capital = storage['capital']
-            if capital <= 0:
-                raise ValueError(f'{name} exhausted its capital before window {number}; insolvency requires a separate model')
-            result = _window_backtest(prices, dates, selected, capital, entry, exit, lookback,
-                                      fee, borrow, max_hold)
-            curve, trades = result['equity_curve'], result['trades'].copy()
-            if number < len(windows) and not trades.empty:
-                trades.loc[trades.Exit_Reason == 'end_of_data', 'Exit_Reason'] = 'month_end'
-            trades['Variant'] = name
-            trades['Window'] = number
-            trades['Trading_Start'] = dates[0]
-            trades['Trading_End'] = dates[-1]
-            final = float(curve.iloc[-1])
-            for pair in selected.Pair:
-                storage['selected_counts'][pair] = storage['selected_counts'].get(pair, 0) + 1
-            storage['curves'].append(curve)
-            if not trades.empty:
-                storage['logs'].append(trades)
-            storage['monthly'].append({
-                'Variant': name, 'Window': number,
-                'Formation_Start': first_formation_start if name == 'fixed_selection' else formation.index[0],
-                'Formation_End': first_formation_end if name == 'fixed_selection' else formation.index[-1],
-                'Trading_Start': dates[0], 'Trading_End': dates[-1],
-                'Selected_Pairs': len(selected), 'Starting_Capital': capital,
-                'Ending_Capital': final, 'Net_PnL': final - capital,
-                'Num_Trades': len(trades), 'Total_Costs': float(trades.Costs.sum()),
-                'Return': final / capital - 1, 'Cash_Only': selected.empty,
-            })
-            storage['capital'] = final
-    variants = {}
-    for name, storage in variant_storage.items():
-        curve = pd.concat(storage['curves']).rename('Portfolio_Value')
-        trades = (pd.concat(storage['logs'], ignore_index=True) if storage['logs'] else
-                  pd.DataFrame(columns=TRADE_COLUMNS + ['Portfolio_Weight', 'Variant', 'Window', 'Trading_Start', 'Trading_End']))
-        monthly = pd.DataFrame(storage['monthly'])
-        if not curve.index.equals(evaluation_dates):
-            raise AssertionError('Every evaluation close must appear exactly once')
-        if not np.allclose(monthly.Starting_Capital.iloc[1:], monthly.Ending_Capital.iloc[:-1], rtol=1e-12, atol=1e-8):
-            raise AssertionError('Monthly capital must chain without resetting the account')
-        if not np.isclose(trades.Net_PnL.sum(), curve.iloc[-1] - initial_capital, rtol=1e-10, atol=1e-7):
-            raise AssertionError('All allocated trade P&L must reconcile to the complete account')
-        records = []
-        for pair, count in sorted(storage['selected_counts'].items()):
-            subset = trades.loc[trades.Pair == pair]
-            records.append({'Pair': pair, 'Net_PnL': float(subset.Net_PnL.sum()),
-                            'Num_Trades': len(subset), 'Costs': float(subset.Costs.sum()),
-                            'Selected_Windows': count})
-        pair_profits = pd.DataFrame(records, columns=PAIR_PROFIT_COLUMNS)
-        variants[name] = {'equity_curve': curve, 'trades': trades, 'monthly': monthly,
-                          'pair_profits': pair_profits,
-                          'metrics': performance_metrics(curve, trades, float(initial_capital))}
-    screening = pd.concat(all_screening, ignore_index=True)
-    return {'variants': variants, 'screening': screening, 'config': {
-        'tickers': stocks.Ticker.tolist(), 'stock_count': len(stocks),
-        'family_size': len(family), 'variant_names': list(VARIANT_NAMES),
-        'scheduled_windows': scheduled, 'formation_days': formation_days,
-        'evaluation_start': evaluation_dates[0].isoformat(), 'evaluation_end': evaluation_dates[-1].isoformat(),
-        'initial_capital': float(initial_capital), 'entry': entry, 'exit': exit,
-        'lookback': lookback, 'fee': fee, 'borrow': borrow, 'max_hold': max_hold,
-        'selection_alpha': .05, 'adjustment': 'Holm per monthly prescribed family',
-        'all_variants_liquidate_each_window': True,
-        'variants': {
-            'fixed_selection': 'Raw selection and betas frozen from the first formation; monthly forced closures',
-            'monthly_raw': 'Raw p < .05 selection and beta refit each month',
-            'monthly_holm': 'Monthly refit with Holm family correction at .05',
+def run_walk_forward(prices, config, output, source=None, screen_cache=None):
+    output = Path(output)
+    output.mkdir(parents=True, exist_ok=True)
+    windows = schedule_windows(prices.index, config.formation, config.trading_window)
+    plan = {
+        "recorded_before_simulation": datetime.now(
+            ZoneInfo("America/New_York")
+        ).isoformat(),
+        "config": asdict(config),
+        "source": source or {},
+        "fresh_holdout": False,
+        "variants": ["baseline", "filtered", "previous_loss_filter"],
+        "selection_tuning": "None; thresholds fixed before simulation.",
+        "previous_loss_rule": "On top of filtered selection, exclude unordered pairs with aggregate net P&L < 0 in the immediately preceding window of this variant. New, untraded, skipped and zero-P&L pairs remain eligible. Reallocate equally subject to the existing cap. No permanent blacklist.",
+        "window_count": len(windows),
+        "code_sha256": {
+            p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in Path(__file__).parent.glob("*.py")
         },
-        'correction_note': 'Untestable hypotheses retain raw p = NaN and use explicitly labeled correction input 1.0; correction does not cover repeated testing across months',
-        'limitations': 'Fixed current peer universe and historical adjusted closes; provisional I(1) diagnostics, assumed borrowing/fractional shares, no liquidity or margin-call model; no untouched final holdout claim',
-    }}
+        "windows": [
+            {
+                "formation_start": str(f[0].date()),
+                "formation_end": str(f[-1].date()),
+                "trading_start": str(t[0].date()),
+                "trading_end": str(t[-1].date()),
+            }
+            for f, t in windows
+        ],
+    }
+    (output / "plan.json").write_text(json.dumps(plan, indent=2) + "\n")
+    if screen_cache is not None:
+        screen_cache = Path(screen_cache)
+        previous = json.loads((screen_cache / "plan.json").read_text())
+        if (
+            previous["config"] != plan["config"]
+            or previous["windows"] != plan["windows"]
+        ):
+            raise ValueError("Screen cache settings or chronological windows differ.")
+        for key in ["cache_sha256", "universe_sha256"]:
+            if (
+                not plan["source"].get(key)
+                or previous["source"].get(key) != plan["source"][key]
+            ):
+                raise ValueError("Screen cache input hashes differ.")
+        for key in ["cointegration.py", "stock_clustering.py"]:
+            if previous["code_sha256"][key] != plan["code_sha256"][key]:
+                raise ValueError("Screening code changed; recompute pair tests.")
+    storage = {
+        name: {"capital": config.capital, "curves": [], "trades": []}
+        for name in plan["variants"]
+    }
+    rows = []
+    previous_losses = set()
+    for number, (formation, dates) in enumerate(windows, 1):
+        assert formation[-1] < dates[0]
+        history = prices.loc[: dates[-1]]
+        train = history.loc[formation]
+        valid = np.isfinite(train).all() & (train > 0).all()
+        train = train.loc[:, sorted(train.columns[valid])]
+        labels, _ = cluster_stocks(train, config.clusters, config.seed)
+        family = within_cluster_pairs(labels)
+        print(
+            f"Window {number}/{len(windows)}: {dates[0].date()} to {dates[-1].date()}; {len(family):,} cointegration tests",
+            flush=True,
+        )
+        cached = screen_cache / "windows" / f"{number:02d}" if screen_cache else None
+        if cached and (cached / "cointegration-tests.csv").exists():
+            panel = pd.read_csv(cached / "cointegration-tests.csv")
+            expected = {f"{a}-{b}" for a, b in family}
+            if set(panel.Pair) != expected or len(panel) != len(family):
+                raise ValueError("Cached pair family differs.")
+            panel["Selected"] = panel.Base_Selected
+            diagnostics = pd.read_csv(cached / "stock-diagnostics.csv")
+            print("  Reusing verified formation-screen results.", flush=True)
+        else:
+            with threadpool_limits(limits=1):
+                panel, diagnostics = screen_pairs(
+                    train, family, config.pvalue, config.correction
+                )
+        panel = apply_filters(panel, train, config)
+        directory = output / "windows" / f"{number:02d}"
+        directory.mkdir(parents=True)
+        panel.to_csv(directory / "cointegration-tests.csv", index=False)
+        diagnostics.to_csv(directory / "stock-diagnostics.csv", index=False)
+        labels.to_csv(directory / "cluster-assignments.csv", index_label="Ticker")
+        for variant in storage:
+            selected = panel[
+                panel.Base_Selected if variant == "baseline" else panel.Selected
+            ].copy()
+            if variant == "baseline":
+                selected["Weight"] = 1 / max(len(selected), 1)
+            excluded_count = 0
+            if variant == "previous_loss_filter":
+                selected, audit = exclude_previous_losses(
+                    selected, previous_losses, config.max_pair_weight
+                )
+                excluded_count = int(audit.Previous_Window_Loser.sum())
+                audit.to_csv(directory / "previous-loss-audit.csv", index=False)
+            selected.to_csv(directory / f"{variant}-selected.csv", index=False)
+            capital = storage[variant]["capital"]
+            if capital <= 0:
+                raise ValueError("Account exhausted; stop before the next window.")
+            settings = replace(config, capital=capital)
+            portfolio, _, _ = evaluate_pairs(
+                history,
+                dates,
+                selected,
+                settings,
+                directory if variant == "filtered" else None,
+            )
+            if variant == "previous_loss_filter":
+                previous_losses = previous_window_losers(portfolio["trades"])
+            curve = portfolio["equity_curve"]
+            trades = portfolio["trades"].copy()
+            metrics = portfolio["metrics"]
+            pd.testing.assert_index_equal(curve.index, dates)
+            trades["Window"] = number
+            trades["Variant"] = variant
+            trades.to_csv(directory / f"{variant}-trades.csv", index=False)
+            curve.to_csv(directory / f"{variant}-account.csv", index_label="Date")
+            if number < len(windows):
+                trades.loc[trades.Exit_Reason.eq("end_of_data"), "Exit_Reason"] = (
+                    "window_end"
+                )
+            storage[variant]["curves"].append(curve)
+            if len(trades):
+                storage[variant]["trades"].append(trades)
+            storage[variant]["capital"] = float(curve.iloc[-1])
+            rows.append(
+                {
+                    "Window": number,
+                    "Variant": variant,
+                    "Formation_Start": formation[0],
+                    "Formation_End": formation[-1],
+                    "Trading_Start": dates[0],
+                    "Trading_End": dates[-1],
+                    "Tested_Pairs": len(panel),
+                    "Base_Candidates": int(panel.Base_Selected.sum()),
+                    "Recovery_Candidates": int(panel.Recovery_Eligible.sum()),
+                    "Selected_Pairs": len(selected),
+                    "Previous_Losers_Excluded": excluded_count,
+                    "Starting_Capital": capital,
+                    "Ending_Capital": curve.iloc[-1],
+                    "Cash_Weight": max(0.0, 1 - selected.Weight.sum()),
+                    **metrics,
+                }
+            )
+            print(
+                f"  {variant}: {metrics['Total_Return']:.2%}; {len(selected)} pairs; {metrics['Num_Trades']} trades",
+                flush=True,
+            )
+    metrics_rows = []
+    portfolios = {}
+    for name, saved in storage.items():
+        curve = pd.concat(saved["curves"]).rename("Portfolio_Value")
+        expected = prices.index[config.formation :]
+        pd.testing.assert_index_equal(curve.index, expected)
+        trades = (
+            pd.concat(saved["trades"], ignore_index=True)
+            if saved["trades"]
+            else pd.DataFrame(columns=TRADE_COLUMNS + ["Window", "Variant"])
+        )
+        assert np.isclose(
+            trades.Net_PnL.sum(), curve.iloc[-1] - config.capital, atol=1e-7
+        )
+        subset = pd.DataFrame(rows).query("Variant == @name")
+        np.testing.assert_allclose(
+            subset.Starting_Capital.iloc[1:], subset.Ending_Capital.iloc[:-1]
+        )
+        metrics = performance_metrics(curve, trades, config.capital)
+        metrics_rows.append({"Variant": name, **metrics})
+        curve.to_csv(output / f"{name}-account.csv", index_label="Date")
+        trades.to_csv(output / f"{name}-trades.csv", index=False)
+        portfolios[name] = {"equity_curve": curve, "trades": trades, "metrics": metrics}
+    pd.DataFrame(metrics_rows).to_csv(output / "comparison.csv", index=False)
+    pd.DataFrame(rows).to_csv(output / "window-results.csv", index=False)
+    write_walk_forward_report(output, plan, pd.DataFrame(rows), portfolios)
+    print(f"Results: {output / 'report.html'}", flush=True)
+    return {"plan": plan, "windows": pd.DataFrame(rows), "portfolios": portfolios}

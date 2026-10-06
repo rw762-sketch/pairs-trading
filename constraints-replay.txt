@@ -1,0 +1,11 @@
+# Numerical and direct dependencies used to verify the official frozen replay.
+# Verified locally with Python 3.13; numpy/scipy require Python >= 3.12.
+numpy==2.5.3
+pandas==3.0.6
+scipy==1.18.1
+statsmodels==0.15.0
+scikit-learn==1.9.1
+threadpoolctl==3.7.0
+matplotlib==3.11.2
+yfinance==1.7.0
+reportlab==5.0.1

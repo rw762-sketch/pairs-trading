@@ -1,0 +1,46 @@
+{
+  "config": {
+    "start": "2021-09-17",
+    "end": "2026-09-18",
+    "train_fraction": 0.7,
+    "clusters": 10,
+    "seed": 42,
+    "pvalue": 0.05,
+    "correction": "raw",
+    "lookback": 60,
+    "entry": 2.0,
+    "exit": 0.5,
+    "stop": 3.5,
+    "max_hold": 0,
+    "fee": 0.001,
+    "borrow": 0.02,
+    "capital": 100000.0,
+    "half_life_min": 1.0,
+    "half_life_max": 20.0,
+    "min_crossings": 12.0,
+    "max_pair_weight": 0.2,
+    "formation": 252,
+    "trading_window": 126
+  },
+  "reservation": {
+    "reserved_closes": 252,
+    "reserved_start": "2025-09-17",
+    "reserved_end": "2026-09-17",
+    "development_end": "2025-09-16",
+    "fresh_holdout": false,
+    "reason": "Historical dates already inspected; reserved for workflow checks, not untouched validation.",
+    "prospective_test": "Freeze rules before inspecting future observations; target 252 new trading closes."
+  },
+  "persistence": "Raw p < 0.05 in at least 3/6 formation windows, including latest; final pre-test formation must also pass.",
+  "price_sha256": "2cd8f34598beded9c2ea6d6ad79a4fadd3b594dc6a448483e05959b49192c360",
+  "hold_limits": [
+    0
+  ],
+  "fresh_holdout": false,
+  "note": "Historical test period previously inspected. No variant selected using test returns. Persistence replaces previous-loss exclusion for this experiment; existing recovery and exposure rules retained.",
+  "screen_results": "results/2026-10-05_20-41-12",
+  "cached_screens_sha256": {
+    "final-formation-tests.csv": "77507f1d6381cb8b170289152a41f9851a7abe56713d8aafd5f7a532d35769d4",
+    "persistence-tests.csv": "32ca52deeee6e88c9157f36a9d2fbf37beb322d7fbf98597dc8b785c009e2449"
+  }
+}

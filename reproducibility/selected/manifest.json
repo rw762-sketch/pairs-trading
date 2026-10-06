@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "purpose": "Frozen inputs for exact replay of the official weighted 3-of-6 strategy; not untouched validation.",
+  "selected_strategy_sha256": "8fffb0bee136ca8e88f59be71cc128538bc91f40971199187047baefcf209641",
+  "source": "Yahoo Finance adjusted closes via yfinance; original project snapshot and screening records.",
+  "history_start": "2021-09-17",
+  "history_end": "2026-09-17",
+  "history_rows": 1255,
+  "history_columns": 503,
+  "reference_run": "results/2026-10-05_20-47-31",
+  "expected_result": {
+    "evaluation_start": "2025-09-17",
+    "evaluation_end": "2026-09-17",
+    "total_return": 0.0390081303662568,
+    "num_pairs": 3,
+    "num_trades": 22,
+    "fresh_holdout": false
+  },
+  "pickle_writer_pandas_version": "3.0.6",
+  "file_sha256": {
+    "adjusted-prices.pkl": "2cd8f34598beded9c2ea6d6ad79a4fadd3b594dc6a448483e05959b49192c360",
+    "final-formation-tests.csv": "a47c7ed86ad751c96a3be7724ae65ef60a4694933d48cf3d74b2f3fd6a8f7404",
+    "persistence-tests.csv": "c0a4253ce6e0b761f5f7652a4ea77aaf57032a560ce4785846464d77b7382b74",
+    "selected-pairs.csv": "40b14dea94a4c115988e14f44c3f7f3c9b90109ac8a537d33548bc9b873d6aa2",
+    "unlimited-trades.csv": "d905b3901b8265584afaed9082b176350adf96779887c66b31b94960e551d086",
+    "plan.json": "00a6985d54024fc3be8504c1f1ab4d8dc6f00fd52e4118af25e43f3e51a94a67"
+  },
+  "metadata_sanitization": {
+    "plan.json": {
+      "original_sha256": "316cc8af6a2571b7ed66608c6bcbe57a3a4a0814749eba51d304f9af4bbfc53d",
+      "change": "screen_results changed from an absolute local path to the repository-relative original run path. Numerical inputs and historical settings are unchanged."
+    }
+  }
+}

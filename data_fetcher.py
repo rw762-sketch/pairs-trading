@@ -1,148 +1,96 @@
-"""
-Data fetching and preprocessing module for pairs trading strategy.
-Downloads S&P 500 stock prices and handles data cleaning.
-"""
+"""Yahoo Finance adjusted-close acquisition with a verified local cache."""
 
-import yfinance as yf
-import pandas as pd
+import json
+from datetime import datetime, timezone
+from pathlib import Path
 import numpy as np
-import requests
-from io import StringIO
-from datetime import datetime, timedelta
-import logging
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+import pandas as pd
+import yfinance as yf
 
 
-def get_sp500_tickers():
-    """Fetch S&P 500 tickers from Wikipedia."""
-    url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
-    response = requests.get(
-        url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=30
-    )
-    response.raise_for_status()
-    tables = pd.read_html(StringIO(response.text))
-    table = next(t for t in tables if 'Symbol' in t.columns)
-    # Yahoo Finance uses hyphens for share classes (for example, BRK-B).
-    tickers = table['Symbol'].str.replace('.', '-', regex=False).tolist()
-    logger.info(f"Fetched {len(tickers)} S&P 500 tickers")
-    return tickers
-
-
-def fetch_price_data(tickers, start_date, end_date):
-    """
-    Fetch historical price data for given tickers.
-    
-    Args:
-        tickers (list): List of stock tickers
-        start_date (str): Start date in format 'YYYY-MM-DD'
-        end_date (str): End date in format 'YYYY-MM-DD'
-    
-    Returns:
-        pd.DataFrame: Closing prices with tickers as columns and dates as index
-    """
-    logger.info(f"Fetching price data for {len(tickers)} tickers from {start_date} to {end_date}")
-    
-    try:
-        data = yf.download(
-            tickers,
-            start=start_date,
-            end=end_date,
-            auto_adjust=False,
-            progress=True
+def load_prices(universe_path, cache_dir, start, end, refresh=False):
+    records = json.loads(Path(universe_path).read_text())
+    tickers = sorted(row["Yahoo ticker"] for row in records)
+    if len(set(tickers)) != len(tickers):
+        raise ValueError("Universe tickers must be unique.")
+    if pd.Timestamp(start) >= pd.Timestamp(end):
+        raise ValueError("Start must precede exclusive end.")
+    directory = Path(cache_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    cache = directory / "adjusted-prices.pkl"
+    metadata = directory / "price-cache-info.json"
+    request = {"tickers": tickers, "start": start, "end_exclusive": end}
+    cached = not refresh and cache.exists() and metadata.exists()
+    info = json.loads(metadata.read_text()) if cached else {}
+    if cached and info.get("request") == request:
+        prices = pd.read_pickle(cache)
+        print(f"Using cached prices: {cache}", flush=True)
+    else:
+        raw = yf.download(
+            tickers, start=start, end=end, auto_adjust=False, progress=False, threads=8
         )
-
-        # Yahoo Finance returns a MultiIndex for multiple tickers.
-        if isinstance(data.columns, pd.MultiIndex):
-            price_field = 'Adj Close' if 'Adj Close' in data.columns.levels[0] else 'Close'
-            data = data[price_field]
-        elif 'Adj Close' in data.columns:
-            data = data['Adj Close']
-        elif len(tickers) == 1 and isinstance(data, pd.DataFrame):
-            data = data.to_frame()
-            data.columns = tickers
-        
-        # Handle case where single ticker returns Series
-        if isinstance(data, pd.Series):
-            data = data.to_frame()
-            data.columns = tickers if len(tickers) == 1 else [data.name or tickers[0]]
-        
-        return data
-    
-    except Exception as e:
-        logger.error(f"Error fetching data: {e}")
-        raise
-
-
-def clean_price_data(price_data, min_history_days=252):
-    """
-    Clean price data by removing tickers with insufficient data.
-    
-    Args:
-        price_data (pd.DataFrame): Price data with tickers as columns
-        min_history_days (int): Minimum number of trading days required
-    
-    Returns:
-        pd.DataFrame: Cleaned price data
-    """
-    logger.info(f"Cleaning data: removing tickers with less than {min_history_days} days of history")
-    
-    # Remove tickers with missing data
-    price_data = price_data.dropna(axis=1, how='any')
-    
-    # Check that we have enough history for each ticker
-    min_dates = price_data.count()
-    valid_tickers = min_dates[min_dates >= min_history_days].index.tolist()
-    
-    logger.info(f"Removed {len(price_data.columns) - len(valid_tickers)} tickers with insufficient data")
-    logger.info(f"Keeping {len(valid_tickers)} tickers with at least {min_history_days} days")
-    
-    return price_data[valid_tickers]
+        if (
+            not isinstance(raw.columns, pd.MultiIndex)
+            or "Adj Close" not in raw.columns.levels[0]
+        ):
+            raise ValueError(
+                "Expected Yahoo adjusted closes; refusing an unadjusted fallback."
+            )
+        prices = raw["Adj Close"].sort_index().reindex(columns=tickers)
+        if prices.empty:
+            raise ValueError("Yahoo returned no prices.")
+        prices.to_pickle(cache)
+        info = {
+            "request": request,
+            "fetched_at_utc": datetime.now(timezone.utc).isoformat(),
+            "source": "Yahoo Finance via yfinance",
+        }
+        metadata.write_text(json.dumps(info, indent=2) + "\n")
+    if (
+        not isinstance(prices.index, pd.DatetimeIndex)
+        or not prices.index.is_unique
+        or not prices.index.is_monotonic_increasing
+        or prices.index.hasnans
+    ):
+        raise ValueError("Price dates must be unique, finite and chronological.")
+    if (
+        prices.empty
+        or prices.index[0] < pd.Timestamp(start)
+        or prices.index[-1] >= pd.Timestamp(end)
+    ):
+        raise ValueError("Cache observations do not match the requested window.")
+    return prices.reindex(columns=tickers), info
 
 
-def calculate_log_returns(price_data):
-    """
-    Calculate log returns from price data.
-    
-    Args:
-        price_data (pd.DataFrame): Price data
-    
-    Returns:
-        pd.DataFrame: Log returns
-    """
-    return np.log(price_data / price_data.shift(1)).dropna()
+def split_prices(prices, train_fraction=0.7, lookback=60):
+    """Determine eligibility from training observations only; never fill prices."""
+    if not 0 < train_fraction < 1:
+        raise ValueError("train_fraction must lie between zero and one.")
+    boundary = int(len(prices) * train_fraction)
+    if boundary < max(60, lookback + 1) or len(prices) - boundary < 2:
+        raise ValueError("Insufficient training or evaluation observations.")
+    training = prices.iloc[:boundary]
+    valid = np.isfinite(training).all() & (training > 0).all()
+    eligible = sorted(training.columns[valid])
+    return (
+        training[eligible],
+        prices.iloc[boundary:][eligible],
+        sorted(set(prices.columns) - set(eligible)),
+    )
 
 
-def split_data(price_data, train_end_ratio=0.7):
-    """
-    Split data into in-sample (training) and out-of-sample (testing) periods.
-    
-    Args:
-        price_data (pd.DataFrame): Price data
-        train_end_ratio (float): Ratio for train/test split
-    
-    Returns:
-        tuple: (train_data, test_data)
-    """
-    split_index = int(len(price_data) * train_end_ratio)
-    train_data = price_data.iloc[:split_index]
-    test_data = price_data.iloc[split_index:]
-    
-    logger.info(f"Data split: {len(train_data)} in-sample, {len(test_data)} out-of-sample")
-    
-    return train_data, test_data
-
-
-if __name__ == "__main__":
-    # Example usage
-    tickers = get_sp500_tickers()[:50]  # Use first 50 for testing
-    end_date = datetime.now().strftime('%Y-%m-%d')
-    start_date = (datetime.now() - timedelta(days=365*3)).strftime('%Y-%m-%d')
-    
-    price_data = fetch_price_data(tickers, start_date, end_date)
-    price_data = clean_price_data(price_data)
-    train_data, test_data = split_data(price_data)
-    
-    print(f"Final dataset shape: {price_data.shape}")
-    print(f"Price data head:\n{price_data.head()}")
+def reserve_testing_period(prices, testing_closes=252, formation=252):
+    """Exclude a trailing test block before any development screen or simulation."""
+    if testing_closes < 2 or len(prices) - testing_closes < formation + 2:
+        raise ValueError("Need at least two test closes and sufficient development history.")
+    development = prices.iloc[:-testing_closes].copy()
+    reserved = prices.index[-testing_closes:]
+    return development, {
+        "reserved_closes": len(reserved),
+        "reserved_start": str(reserved[0].date()),
+        "reserved_end": str(reserved[-1].date()),
+        "development_end": str(development.index[-1].date()),
+        "fresh_holdout": False,
+        "reason": "Historical dates already inspected; reserved for workflow checks, not untouched validation.",
+        "prospective_test": "Freeze rules before inspecting future observations; target 252 new trading closes.",
+    }

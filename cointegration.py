@@ -1,163 +1,133 @@
-"""
-Cointegration testing module for identifying cointegrated stock pairs.
-Uses Engle-Granger two-step method and ADF test.
-"""
+"""Engle-Granger testing for EVERY prescribed within-cluster pair."""
 
-import pandas as pd
+import warnings
 import numpy as np
-from scipy import stats
+import pandas as pd
 from statsmodels.tsa.stattools import adfuller, coint
-import logging
+from statsmodels.stats.multitest import multipletests
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+COLUMNS = [
+    "Pair",
+    "Ticker1",
+    "Ticker2",
+    "Raw_P",
+    "Holm_P",
+    "Alpha",
+    "Beta",
+    "AR1_Phi",
+    "Half_Life",
+    "I1_Compatible",
+    "Status",
+    "Error",
+    "Selected",
+]
 
 
-def engle_granger_test(price_series1, price_series2, critical_value=0.05):
+def half_life(residual):
+    x = np.asarray(residual, dtype=float)
+    design = np.column_stack([np.ones(len(x) - 1), x[:-1]])
+    coefficients, _, rank, _ = np.linalg.lstsq(design, x[1:], rcond=None)
+    phi = float(coefficients[1]) if rank == 2 else np.nan
+    return phi, float(-np.log(2) / np.log(phi)) if 0 < phi < 1 else np.nan
+
+
+def integration_diagnostics(training):
+    rows = []
+    for ticker in training:
+        level = difference = np.nan
+        error = ""
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                level = float(adfuller(training[ticker], autolag="AIC")[1])
+                difference = float(
+                    adfuller(training[ticker].diff().dropna(), autolag="AIC")[1]
+                )
+        except (ValueError, np.linalg.LinAlgError) as exc:
+            error = str(exc)
+        rows.append(
+            {
+                "Ticker": ticker,
+                "Level_ADF_P": level,
+                "Diff_ADF_P": difference,
+                "I1_Compatible": bool(level >= 0.05 and difference < 0.05),
+                "Error": error,
+            }
+        )
+    return pd.DataFrame(
+        rows, columns=["Ticker", "Level_ADF_P", "Diff_ADF_P", "I1_Compatible", "Error"]
+    )
+
+
+def screen_pairs(
+    training, candidate_pairs, pvalue=0.05, correction="raw", progress=False
+):
+    """No correlation or industry filter precedes the cointegration tests.
+
+    The positive-beta and I(1) diagnostics govern trading eligibility AFTER all
+    pairs have been tested. Failed tests remain in the saved family with status.
+    Holm includes the entire family; failed tests use conservative p=1 inputs.
     """
-    Perform Engle-Granger cointegration test on two price series.
-    
-    Args:
-        price_series1 (pd.Series): First price series
-        price_series2 (pd.Series): Second price series
-        critical_value (float): Significance level for the test
-    
-    Returns:
-        dict: Test results including p-value, hedge ratio, and test statistic
-    """
-    # Remove any NaN values
-    valid_idx = ~(price_series1.isna() | price_series2.isna())
-    s1 = price_series1[valid_idx].values
-    s2 = price_series2[valid_idx].values
-    
-    if len(s1) < 10:
-        return None
-    
-    # Run Engle-Granger test
-    score, pvalue, _ = coint(s1, s2)
-    
-    # Estimate hedge ratio using linear regression
-    # Z = Y - beta * X, where beta is the hedge ratio
-    X = np.column_stack([np.ones(len(s1)), s2])
-    params = np.linalg.lstsq(X, s1, rcond=None)[0]
-    hedge_ratio = params[1]
-    intercept = params[0]
-    
-    # Calculate spread
-    spread = s1 - hedge_ratio * s2
-    
-    # ADF test on spread
-    adf_result = adfuller(spread, autolag='AIC', store=False, regresults=False)
-    adf_pvalue = adf_result[1]
-    
-    return {
-        'coint_pvalue': pvalue,
-        'adf_pvalue': adf_pvalue,
-        'hedge_ratio': hedge_ratio,
-        'intercept': intercept,
-        'coint_score': score,
-        'adf_statistic': adf_result[0],
-        'is_cointegrated': pvalue < critical_value and adf_pvalue < critical_value
-    }
-
-
-def find_cointegrated_pairs(price_data, coint_threshold=0.05, adf_threshold=0.05, sample=None):
-    """
-    Find all cointegrated pairs in the price data.
-    
-    Args:
-        price_data (pd.DataFrame): Price data with tickers as columns
-        coint_threshold (float): Cointegration p-value threshold
-        adf_threshold (float): ADF test p-value threshold
-        sample (int): Number of pairs to sample (for testing). None to test all.
-    
-    Returns:
-        list: List of (ticker1, ticker2, test_results) tuples for cointegrated pairs
-    """
-    tickers = price_data.columns.tolist()
-    n_tickers = len(tickers)
-    cointegrated_pairs = []
-    
-    # Generate all pairs
-    total_pairs = n_tickers * (n_tickers - 1) // 2
-    logger.info(f"Testing {total_pairs} pairs for cointegration")
-    
-    pair_count = 0
-    for i in range(n_tickers):
-        for j in range(i + 1, n_tickers):
-            pair_count += 1
-            
-            if sample and pair_count > sample:
-                logger.info(f"Sample limit reached at {sample} pairs")
-                break
-            
-            ticker1, ticker2 = tickers[i], tickers[j]
-            
-            result = engle_granger_test(
-                price_data[ticker1],
-                price_data[ticker2],
-                critical_value=coint_threshold
-            )
-            
-            if result and result['is_cointegrated']:
-                result['ticker1'] = ticker1
-                result['ticker2'] = ticker2
-                cointegrated_pairs.append(result)
-                
-                if pair_count % 1000 == 0:
-                    logger.info(f"Processed {pair_count} pairs, found {len(cointegrated_pairs)} cointegrated")
-    
-    logger.info(f"Found {len(cointegrated_pairs)} cointegrated pairs")
-    
-    return cointegrated_pairs
-
-
-def rank_pairs(cointegrated_pairs, metric='coint_pvalue'):
-    """
-    Rank cointegrated pairs by a quality metric.
-    
-    Args:
-        cointegrated_pairs (list): List of cointegrated pair results
-        metric (str): Metric to sort by ('coint_pvalue', 'adf_pvalue', 'coint_score')
-    
-    Returns:
-        list: Ranked list of pairs
-    """
-    ranked = sorted(cointegrated_pairs, key=lambda x: x[metric])
-    return ranked
-
-
-def results_to_dataframe(cointegrated_pairs):
-    """Convert cointegration test results to a DataFrame."""
-    return pd.DataFrame([
-        {
-            'Ticker1': p['ticker1'],
-            'Ticker2': p['ticker2'],
-            'Coint_PValue': p['coint_pvalue'],
-            'ADF_PValue': p['adf_pvalue'],
-            'Hedge_Ratio': p['hedge_ratio'],
-            'Coint_Score': p['coint_score'],
-            'ADF_Statistic': p['adf_statistic']
+    if correction not in {"raw", "holm"} or not 0 < pvalue < 1:
+        raise ValueError("Use correction raw/holm and a p-value cutoff in (0,1).")
+    pairs = list(candidate_pairs)
+    if any(a == b or a not in training or b not in training for a, b in pairs):
+        raise ValueError("Pairs require two distinct available tickers.")
+    if len({frozenset(pair) for pair in pairs}) != len(pairs):
+        raise ValueError("Duplicate candidate pairs.")
+    diagnostics = integration_diagnostics(training)
+    compatible = diagnostics.set_index("Ticker").I1_Compatible.to_dict()
+    rows = []
+    for number, (a, b) in enumerate(pairs, 1):
+        row = {
+            "Pair": f"{a}-{b}",
+            "Ticker1": a,
+            "Ticker2": b,
+            "Raw_P": np.nan,
+            "Alpha": np.nan,
+            "Beta": np.nan,
+            "AR1_Phi": np.nan,
+            "Half_Life": np.nan,
+            "Status": "tested",
+            "Error": "",
+            "I1_Compatible": compatible.get(a, False) and compatible.get(b, False),
         }
-        for p in cointegrated_pairs
-    ])
-
-
-if __name__ == "__main__":
-    from data_fetcher import fetch_price_data, clean_price_data, split_data
-    from datetime import datetime, timedelta
-    
-    # Example usage
-    tickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'JPM', 'V', 'JNJ', 'WMT', 'PG']
-    end_date = datetime.now().strftime('%Y-%m-%d')
-    start_date = (datetime.now() - timedelta(days=365*3)).strftime('%Y-%m-%d')
-    
-    price_data = fetch_price_data(tickers, start_date, end_date)
-    price_data = clean_price_data(price_data)
-    train_data, test_data = split_data(price_data)
-    
-    pairs = find_cointegrated_pairs(train_data, coint_threshold=0.05, sample=10)
-    pairs_df = results_to_dataframe(pairs)
-    
-    print(f"Found {len(pairs)} cointegrated pairs")
-    print(pairs_df.head())
+        try:
+            av = training[a].to_numpy(dtype=float)
+            bv = training[b].to_numpy(dtype=float)
+            alpha, beta = np.linalg.lstsq(
+                np.column_stack([np.ones(len(bv)), bv]), av, rcond=None
+            )[0]
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                raw = float(coint(av, bv, trend="c", autolag="aic")[1])
+            if not np.isfinite([alpha, beta, raw]).all():
+                raise ValueError("Nonfinite fit or cointegration result.")
+            phi, life = half_life(av - alpha - beta * bv)
+            row.update(
+                Raw_P=raw,
+                Alpha=float(alpha),
+                Beta=float(beta),
+                AR1_Phi=phi,
+                Half_Life=life,
+            )
+        except (ValueError, np.linalg.LinAlgError) as exc:
+            row.update(Status="failed", Error=str(exc))
+        rows.append(row)
+        if progress and (number % 500 == 0 or number == len(pairs)):
+            print(f"Cointegration: {number:,}/{len(pairs):,} pairs tested", flush=True)
+    panel = pd.DataFrame(rows).reindex(columns=COLUMNS)
+    if len(panel):
+        panel["Holm_P"] = multipletests(panel.Raw_P.fillna(1), method="holm")[1]
+    cutoff = panel.Holm_P if correction == "holm" else panel.Raw_P
+    panel["Selected"] = (
+        panel.Status.eq("tested")
+        & (cutoff < pvalue)
+        & (panel.Beta > 0)
+        & panel.I1_Compatible
+        & np.isfinite(panel.Half_Life.astype(float))
+    ).astype(bool)
+    panel = panel.sort_values(
+        ["Raw_P", "Half_Life", "Pair"], na_position="last"
+    ).reset_index(drop=True)
+    return panel, diagnostics

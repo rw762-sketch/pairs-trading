@@ -1,0 +1,38 @@
+{
+  "name": "Selected 3-of-6 strategy",
+  "config": {
+    "start": "2021-09-17",
+    "end": "2026-09-18",
+    "train_fraction": 0.7,
+    "clusters": 10,
+    "seed": 42,
+    "pvalue": 0.05,
+    "correction": "raw",
+    "lookback": 60,
+    "entry": 2.0,
+    "exit": 0.5,
+    "stop": 3.5,
+    "max_hold": 0,
+    "fee": 0.001,
+    "borrow": 0.02,
+    "capital": 100000.0,
+    "half_life_min": 1.0,
+    "half_life_max": 20.0,
+    "min_crossings": 12.0,
+    "max_pair_weight": 1.0,
+    "formation": 252,
+    "trading_window": 126
+  },
+  "required_passes": 3,
+  "require_latest": true,
+  "reserved_closes": 252,
+  "reference_run": "results/2026-10-05_20-47-31",
+  "price_sha256": "2cd8f34598beded9c2ea6d6ad79a4fadd3b594dc6a448483e05959b49192c360",
+  "selection_basis": "Retained signal/selection version originally chosen by highest observed portfolio return, with allocation increased to 100% at user request. Final period previously inspected.",
+  "fresh_holdout": false,
+  "allocation": "Normalize pass_count / mean(p over all six training periods), using only selected pairs. Missing p=1, denominator floor=1e-6; no pair allocation cap. Weights fixed before trading; unused pair budgets remain cash.",
+  "allocation_rule": {
+    "method": "pass_count_over_mean_p",
+    "pvalue_floor": 1e-06
+  }
+}

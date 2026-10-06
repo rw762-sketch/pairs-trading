@@ -1,275 +1,100 @@
-# Pairs Trading Strategy Using Cointegration
+# Clustered Pairs Trading Research
 
-> **Current report:** Open [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md) for the corrected results and the complete assignment outputs. Run `./venv/bin/python main.py --report` to rebuild them from saved data. The older overview below describes the initial scaffold; its performance expectations, stock-limit settings, output filenames and optimization claims are not a validation of the current strategy. The current report documents the implemented rules and limitations.
+A Python research pipeline that groups stocks with K-means, tests within-cluster pairs for cointegration, checks persistence across historical periods, and simulates an OLS spread strategy with explicit two-leg accounting.
 
-A comprehensive Python implementation of a statistical arbitrage strategy that identifies cointegrated stock pairs and executes mean-reversion trades.
+The **official version is the weighted 3-of-6 strategy** in [selected_strategy.json](selected_strategy.json). Its saved 2025–2026 backtest returned **3.90% after modeled transaction and borrowing costs**, using three pairs and 22 trades. This period was inspected while choosing the strategy, so the result is a reproducible historical finding rather than untouched validation or evidence of a reliable trading edge.
 
-## Project Overview
+![Official strategy cumulative return](reports/selected-2025-2026/cumulative-return.png)
 
-This project implements a pairs trading strategy that:
-1. **Identifies cointegrated pairs** - Finds stock pairs whose prices move together long-term using Engle-Granger cointegration test
-2. **Generates trading signals** - Calculates spreads and z-scores to identify mean-reversion opportunities
-3. **Backtests the strategy** - Simulates trading with transaction costs and generates performance metrics
-4. **Validates out-of-sample** - Tests strategy on unseen data to avoid overfitting
-5. **Optimizes parameters** - Finds optimal entry/exit thresholds and cointegration filters
+## What the project demonstrates
 
-## Key Features
+- **Statistical screening:** training-only K-means features, complete within-cluster Engle–Granger tests, integration diagnostics, and AR(1) recovery estimates.
+- **Chronological signals:** trailing spread statistics exclude the current close; a close's signal executes at the following close.
+- **Portfolio accounting:** fixed hedge quantities, assigned pair budgets, idle cash, entry and exit fees, short borrowing, and final liquidation.
+- **Research reproducibility:** pinned settings, hashed input data, saved selection evidence, trade logs, and tests for timing, sizing, costs, and allocation.
 
-- **Statistical Testing**: Engle-Granger two-step cointegration test with ADF validation
-- **Sophisticated Signals**: Rolling z-score calculation with dynamic entry/exit thresholds
-- **Realistic Backtesting**: Transaction costs, slippage, and holding period constraints
-- **Comprehensive Analysis**: Sharpe ratio, drawdown, win rate, turnover metrics
-- **Parameter Optimization**: Grid search over parameter combinations
-- **Overfitting Detection**: Compare in-sample vs out-of-sample performance
-- **Professional Visualizations**: Equity curves, drawdown charts, spread analysis
-- **Detailed Reporting**: Trade logs, performance summaries, statistical analysis
+## Reproduce the official result
 
-## Installation
-
-### Requirements
-- Python 3.8+
-- See `requirements.txt` for dependencies
-
-### Setup
+Use Python 3.13, the version used for local verification (the pinned dependencies require Python 3.12 or newer). Numerical dependency versions are recorded in [constraints-replay.txt](constraints-replay.txt). The frozen replay inputs are included in [reproducibility/selected](reproducibility/selected), so this command does not download market data.
 
 ```bash
-# Clone or navigate to project directory
-cd Pair\ trading\ project
-
-# Create virtual environment (optional but recommended)
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-python -m pip install --upgrade pip setuptools wheel
+git clone https://github.com/rw762-sketch/pairs-trading.git
+cd pairs-trading
+python3 -m venv .venv
+source .venv/bin/activate
 python -m pip install -r requirements.txt
-
-
-```
-
-## Quick Start
-
-### Running the Full Pipeline
-
-```bash
+python -m unittest discover -s tests -p 'test_*.py'
 python main.py
 ```
 
-This will:
-1. Download 3 years of S&P 500 stock data (30 stocks by default)
-2. Find cointegrated pairs in training data (70% of data)
-3. Generate trading signals on test data (30% of data)
-4. Backtest the strategy with realistic costs
-5. Generate visualizations and reports
+The expected result is **3.900813% net return, 22 trades, and three selected pairs**. Each run writes a dated folder under `results/` with an HTML report, equity curve, allocation table, trade log, pair metrics, and performance table. Open `results/index.html` for the latest local report.
 
-Results are saved to the `results/` directory:
-- `cointegrated_pairs.csv` - List of identified pairs
-- `cointegration_heatmap.png` - Visualization of cointegration relationships
-- `backtest_summary.csv` - Performance metrics for each pair
-- `portfolio_metrics.csv` - Overall portfolio performance
-- `backtest_report.txt` - Comprehensive text report
-- Individual pair charts (equity curves, drawdown, etc.)
+The default command replays the frozen selection evidence and recomputes recovery filters, weights, signals, trades, and returns. It does not repeat the full-universe cointegration screen. Input hashes prevent silently substituting a revised price snapshot.
 
-### Custom Configuration
+## Official strategy
 
-Edit `main.py` to customize parameters:
+1. Use a 503-security S&P 500 universe snapshot and Yahoo Finance adjusted daily closes. Cluster stocks into 10 groups using standardized training-period log returns.
+2. Fit every within-cluster pair on the final 252 development closes. Require raw cointegration p-value below 0.05, a positive OLS hedge ratio, compatible integration diagnostics, and a finite recovery estimate.
+3. Require p-value below 0.05 in **at least three of six overlapping 252-close development formations, including the latest**. These periods check historical stability; their overlap means they are not independent tests.
+4. Retain pairs with estimated half-life of 1–20 closes and at least 12 annualized spread mean crossings. Prevent a stock appearing in more than one retained pair.
+5. Assign each pair a budget proportional to `periods_passed / mean_p_value`, then normalize the budgets to 100%. Average p-values include all six periods; missing tests count as p=1. This is a heuristic allocation rule, not an estimated probability of profit.
+6. Trade the fixed OLS spread using its preceding 60-close mean and standard deviation. Enter when `2 < |z| < 3.5`, exit on reversion to the ±0.5 boundary, and stop on an adverse move to ±3.5. Execute at the next close. There is no holding-time limit; open positions close at the evaluation period's end.
 
-```python
-config = {
-    'num_stocks': 50,              # Stocks to analyze
-    'start_date': '2021-01-01',    # Data start date
-    'end_date': '2024-01-01',      # Data end date
-    'train_test_split': 0.7,       # 70% train, 30% test
-    'entry_zscore': 2.0,           # Entry signal threshold
-    'exit_zscore': 0.0,            # Exit signal threshold
-    'transaction_cost': 0.001,     # 0.1% trading cost
-    'initial_capital': 100000,     # Starting capital
-    'output_dir': 'results'
-}
+The 20-close **half-life screening bound** is separate from a trade holding limit. All three pairs receive a fixed budget; an inactive pair's allocation stays in cash.
+
+| Pair | Significant periods | Assigned budget |
+| --- | ---: | ---: |
+| MCO–SPGI | 3/6 | 41.54% |
+| EVRG–WELL | 4/6 | 40.44% |
+| ITW–NXPI | 3/6 | 18.01% |
+
+## Recorded performance
+
+Evaluation dates: **September 17, 2025–September 17, 2026**. Initial capital: **$100,000**.
+
+| Metric | Official result |
+| --- | ---: |
+| Net portfolio return | 3.90% |
+| Gross P&L / initial capital | 5.78% |
+| Annualized return | 3.90% |
+| Annualized volatility | 3.87% |
+| Sharpe ratio, zero risk-free rate | 1.01 |
+| Maximum drawdown | 2.27% |
+| Completed trades / win rate | 22 / 59.09% |
+| Modeled fees + borrowing | $1,882.72 |
+
+Fees are 0.10% of executed gross notional on each entry and exit. Short borrowing is modeled at 2% annually using calendar-day accrual. Cash earns zero interest. A positive zero-risk-free Sharpe does not establish that the strategy beats a cash benchmark.
+
+An earlier-year application of the same rules returned **1.00% net in 2021** with six pairs. A separate ten-year-data preview used eight years of development and two years of evaluation; it is **not the official version**. See [research results](docs/research-results.md) for these comparisons, cost decompositions, and concentration limits.
+
+## Explore the research pipeline
+
+For a new download and a complete screen, explicitly choose an experimental mode:
+
+```bash
+python main.py --mode walk-forward
+python main.py --mode holdout
+python run_historical_year.py --year 2021
 ```
 
-## Module Guide
+`walk-forward` re-forms and trades successive periods. `holdout` runs a chronological split within the development data. Both modes reserve the final 252 closes by default; they are separate experiments and do not recreate the official 3-of-6 result. Previously inspected dates remain reused research data even if a command calls them a holdout. Downloads may differ from the frozen snapshot as the provider revises adjusted history.
 
-### `data_fetcher.py`
-Handles data acquisition and preprocessing.
+## Code map
 
-**Key Functions:**
-- `get_sp500_tickers()` - Fetches S&P 500 stock symbols
-- `fetch_price_data()` - Downloads historical prices via yfinance
-- `clean_price_data()` - Removes stocks with insufficient data
-- `split_data()` - Divides data into train/test periods
+| Component | Responsibility |
+| --- | --- |
+| [data_fetcher.py](data_fetcher.py), [data/README.md](data/README.md) | Download/cache prices, determine training eligibility, reserve dates |
+| [stock_clustering.py](stock_clustering.py), [cointegration.py](cointegration.py) | K-means candidate groups and every within-cluster test |
+| [selection.py](selection.py), [run_persistence.py](run_persistence.py) | Recovery filters and repeated formation-period checks |
+| [allocation.py](allocation.py) | Persistence and mean-p-value budget weights |
+| [signal_generation.py](signal_generation.py), [backtester.py](backtester.py) | Causal spread signals, fills, positions, costs, and accounting |
+| [evaluation.py](evaluation.py), [run_selected.py](run_selected.py) | Portfolio evaluation and the pinned official replay |
+| [tests](tests) | Accounting, chronology, selection, and reproducibility checks |
 
-### `cointegration.py`
-Implements cointegration testing for pair identification.
+## Interpretation and next work
 
-**Key Functions:**
-- `engle_granger_test()` - Two-step cointegration test with ADF validation
-- `find_cointegrated_pairs()` - Screens all pairs for cointegration
-- `rank_pairs()` - Sorts pairs by quality metrics
+The main contribution is an inspectable research workflow with reconciled accounting. Remaining limits include strategy selection after seeing evaluation returns, a current-constituent universe with survivorship bias, raw p-values across a large testing family, only three retained pairs, and simplified execution costs. Adjusted prices are research proxies; the engine does not separately book broker dividend cash flows, margin, or stock-locate constraints.
 
-**Theory:**
-- Two price series are cointegrated if their spread (linear combination) is stationary
-- Tests use Engle-Granger two-step method: regress Y on X, then test residuals for stationarity
-- ADF test checks if residuals have a unit root (non-stationary)
+The general evaluator also checks an entire pair's future price coverage before simulating it. That gate did not affect the official snapshot, whose retained stocks have complete prices, but needs causal handling before broader validation with missing histories. The next research step is to freeze choices before an untouched period, use historical constituents, and evaluate costs and concentration across more market regimes.
 
-### `signal_generation.py`
-Creates trading signals from cointegrated pairs.
-
-**Key Classes:**
-- `PairSignalGenerator` - Calculates spread, z-score, and generates entry/exit signals
-
-**Trading Logic:**
-- **Long spread when**: z-score < -2 (undervalued - short ticker2, long ticker1)
-- **Short spread when**: z-score > +2 (overvalued - long ticker2, short ticker1)
-- **Exit when**: z-score reverts to ±0 (mean reversion complete)
-
-### `backtester.py`
-Simulates trading execution and calculates performance metrics.
-
-**Key Classes:**
-- `PairBacktester` - Runs backtest for a single pair
-- Portfolio combination and weighting functions
-
-**Metrics:**
-- **Returns**: Total return, annualized return
-- **Risk**: Volatility, max drawdown, Sharpe ratio
-- **Trading**: Win rate, average trade P&L, turnover, costs
-
-### `visualization.py`
-Generates charts and reports.
-
-**Key Functions:**
-- `plot_equity_curve()` - Portfolio value over time
-- `plot_spread_and_zscore()` - Signals with entry/exit markers
-- `plot_drawdown()` - Peak-to-trough declines
-- `plot_cointegration_heatmap()` - Pair relationships
-- `generate_comprehensive_report()` - Text summary of results
-
-### `parameter_optimization.py`
-Tunes strategy parameters for optimal performance.
-
-**Key Classes:**
-- `ParameterOptimizer` - Grid search over parameter combinations
-- Overfitting detection via in/out-of-sample comparison
-
-## Strategy Parameters to Optimize
-
-### Cointegration
-- **`coint_threshold`** (default: 0.05): P-value threshold for cointegration test
-  - Lower = stricter requirement for cointegration
-  - Typical range: 0.01 to 0.10
-
-### Trading Signals
-- **`entry_zscore`** (default: 2.0): Entry threshold (in standard deviations)
-  - Higher = wait for larger deviations (fewer trades, less noise)
-  - Typical range: 1.5 to 3.0
-
-- **`exit_zscore`** (default: 0.0): Exit threshold
-  - Higher = exit later (more mean reversion captured)
-  - Typical range: 0.0 to 1.0
-
-### Costs
-- **`transaction_cost`** (default: 0.001): Cost per trade (0.1%)
-  - Includes bid-ask spread and commissions
-  - Check with your broker for actual costs
-
-## Key Insights & Questions
-
-The project guides you to think deeply about:
-
-### 1. Correlation vs Cointegration
-- High correlation ≠ cointegration
-- Correlation is instantaneous; cointegration is about long-term equilibrium
-- Many correlated pairs break down (regime changes, structural breaks)
-
-### 2. Out-of-Sample Reality
-- Cointegrated in-sample often breaks down out-of-sample
-- Market regimes change; statistical relationships decay
-- Watch for "overfitting" where in-sample >> out-of-sample returns
-
-### 3. Transaction Costs Destroy Profits
-- Mean-reversion arbitrage has tight margins
-- With 0.1% costs, need 0.2% spread profit just to break even
-- High turnover pairs often become unprofitable
-
-### 4. Concentration Risk
-- Few pairs often drive most returns
-- Single-pair failures can significantly impact portfolio
-- Diversification across many weak pairs often beats few strong pairs
-
-### 5. Parameter Sensitivity
-- Performance is sensitive to entry/exit thresholds
-- Optimization on training data often leads to overfitting
-- Robust parameters perform better across different market regimes
-
-## Output Files
-
-```
-results/
-├── cointegrated_pairs.csv           # Identified pairs with p-values
-├── cointegration_heatmap.png        # Heatmap of all pair relationships
-├── backtest_summary.csv             # Metrics for each pair
-├── portfolio_metrics.csv            # Portfolio performance
-├── backtest_report.txt              # Comprehensive text report
-├── [PAIR]_equity.png                # Equity curve for pair
-├── [PAIR]_drawdown.png              # Drawdown chart for pair
-└── portfolio_equity.png             # Portfolio equity curve
-```
-
-## Python Libraries Used
-
-- **`pandas`**: Data manipulation and analysis
-- **`numpy`**: Numerical computing
-- **`yfinance`**: Download stock data from Yahoo Finance
-- **`statsmodels`**: Statistical testing (cointegration, ADF test)
-- **`scipy`**: Scientific functions
-- **`matplotlib` / `seaborn`**: Visualization
-
-## Common Issues & Solutions
-
-### Issue: "No pairs found"
-- Try lower cointegration threshold (0.10 instead of 0.05)
-- Use more stocks in analysis
-- Check data has no missing values
-
-### Issue: Poor out-of-sample performance
-- Likely overfitting - reduce entry threshold strictness
-- Use larger training period (2+ years)
-- Check if pairs lose cointegration out-of-sample
-
-### Issue: Data download fails
-- Check internet connection
-- Yahoo Finance sometimes blocks requests - try later
-- Some tickers may not have full data history
-
-### Issue: Slow execution
-- Reduce `num_stocks` for initial testing
-- Cointegration testing is O(n²) in number of stocks
-- Consider sampling pairs instead of testing all
-
-## Future Enhancements
-
-- **Machine Learning**: Use ML to predict which pairs stay cointegrated
-- **Multiple Entry Signals**: Combine cointegration with momentum or volatility
-- **Risk Management**: Position sizing, dynamic hedge ratios
-- **Portfolio Optimization**: Kelly criterion, risk parity weighting
-- **Real-time Trading**: Live signal generation and execution
-- **Multi-timeframe**: Combine daily and intraday signals
-
-## References
-
-- Engle, R. F., & Granger, C. W. (1987). "Co-integration and error correction: representation, estimation, and testing"
-- Vidyamurthy, G. (2004). "Pairs Trading: Quantitative Methods and Analysis"
-- De Prado, M. L. (2018). "Advances in Financial Machine Learning"
-
-## Disclaimer
-
-This project is for educational purposes only. Past performance does not guarantee future results. Pairs trading involves substantial risk of loss. Always paper trade and back-test thoroughly before risking real capital. Consult a financial advisor before implementing any trading strategy.
-
-## Author
-
-Created as a comprehensive learning project on statistical arbitrage and quantitative trading.
-
----
-
-For questions or improvements, feel free to modify and extend the code!
+Detailed definitions and assumptions are in [methodology](docs/methodology.md). Earlier implementations remain accessible through Git history; the root code and README describe the current official strategy.
