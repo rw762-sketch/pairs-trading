@@ -1,17 +1,26 @@
 # Clustered Pairs Trading Research
 
-A Python research pipeline that groups stocks with K-means, tests within-cluster pairs for cointegration, checks persistence across historical periods, and simulates an OLS spread strategy with explicit two-leg accounting.
+A Python research pipeline that reduced candidate pair comparisons by **87%**, automated stock screening and portfolio simulation, and made the resulting backtest reproducible from a fresh clone. It combines K-means grouping, cointegration and persistence checks, OLS spread signals, and explicit two-leg accounting.
 
-The **official version is the weighted 3-of-6 strategy** in [selected_strategy.json](selected_strategy.json). Its saved 2025–2026 historical backtest returned **3.90% after modeled transaction and borrowing costs**, using three pairs and 22 trades. The bundled inputs support exact reproduction of this result.
+The **official version is the weighted 3-of-6 strategy** in [selected_strategy.json](selected_strategy.json). Its saved 2025–2026 historical backtest produced **$3,900.81 simulated net profit on $100,000 initial capital (3.90%)**, with **2.27% maximum drawdown**, using three pairs and 22 trades.
+
+| Impact | Measured outcome |
+| --- | --- |
+| Smaller screening workload | 124,251 possible pairs → 16,106 within-cluster tests; **87.04% fewer comparisons** |
+| Full research workflow | 503-security universe → 499 formation-eligible stocks → 387 initial candidates → 3 retained pairs |
+| Historical portfolio result | **3.90% net return**, 2.27% maximum drawdown, and 22 completed trades |
+| Repeatable review | One-command frozen replay, saved trade records, **43 automated tests**, and GitHub CI |
+
+The comparison reduction uses the same 499 eligible stocks in the official formation period. See the [screening summary](reports/screening-impact.json) for the counts and calculation.
 
 ![Official strategy cumulative return](reports/selected-2025-2026/cumulative-return.png)
 
-## What the project demonstrates
+## How the project creates value
 
-- **Statistical screening:** training-only K-means features, complete within-cluster Engle–Granger tests, integration diagnostics, and AR(1) recovery estimates.
-- **Chronological signals:** trailing spread statistics exclude the current close; a close's signal executes at the following close.
-- **Portfolio accounting:** fixed hedge quantities, assigned pair budgets, idle cash, entry and exit fees, short borrowing, and final liquidation.
-- **Research reproducibility:** pinned settings, hashed input data, saved selection evidence, trade logs, and tests for timing, sizing, costs, and allocation.
+- **Focused research:** K-means avoided 108,145 candidate comparisons while retaining every within-cluster pair for cointegration testing. Persistence and recovery filters narrowed 387 initial candidates to three portfolio pairs.
+- **Automated decisions:** the pipeline turns adjusted price histories into pair selections, hedge ratios, budget weights, trading signals, and dated reports, giving experiments a consistent process.
+- **Cost-aware evaluation:** two-leg accounting reconciles $5,783.54 gross P&L, $1,882.72 modeled fees and borrowing, and $3,900.81 net P&L, showing how implementation costs affect the portfolio result.
+- **Reproducible evidence:** a fresh clone replays the official result with one command after setup. Hashed inputs, saved selection records, 43 tests, and CI support independent review of timing, sizing, costs, and allocation.
 
 ## Reproduce the official result
 

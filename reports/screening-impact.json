@@ -1,0 +1,26 @@
+{
+  "scope": "Official final formation screen; comparison-count reduction, not a runtime benchmark.",
+  "formation_start": "2024-09-13",
+  "formation_end": "2025-09-16",
+  "formation_closes": 252,
+  "requested_securities": 503,
+  "eligible_stocks": 499,
+  "requested_clusters": 10,
+  "unrestricted_possible_pairs": 124251,
+  "within_cluster_tests": 16106,
+  "avoided_comparisons": 108145,
+  "comparison_reduction_fraction": 0.8703752887300706,
+  "calculation": "1 - within_cluster_tests / (eligible_stocks * (eligible_stocks - 1) / 2)",
+  "initial_statistical_candidates": 387,
+  "retained_portfolio_pairs": 3,
+  "sources": [
+    {
+      "path": "reproducibility/selected/adjusted-prices.pkl",
+      "sha256": "2cd8f34598beded9c2ea6d6ad79a4fadd3b594dc6a448483e05959b49192c360"
+    },
+    {
+      "path": "reproducibility/selected/final-formation-tests.csv",
+      "sha256": "a47c7ed86ad751c96a3be7724ae65ef60a4694933d48cf3d74b2f3fd6a8f7404"
+    }
+  ]
+}

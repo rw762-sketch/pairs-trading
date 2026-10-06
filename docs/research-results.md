@@ -1,8 +1,16 @@
 # Research results
 
-The current official strategy produced **+3.90% net return** in a historical backtest over September 17, 2025–September 17, 2026 on a modeled $100,000 account.
+The current official strategy produced **$3,900.81 simulated net profit (+3.90%)** in a historical backtest over September 17, 2025–September 17, 2026 on a modeled $100,000 account. Maximum drawdown was **2.27%**, with 22 completed trades across three pairs.
 
-The project demonstrates a reproducible research pipeline: training-only K-means screening, cointegration and recovery diagnostics, causal signal generation, explicit two-leg accounting, and saved trade-level evidence. The observed returns are modest after costs, and the additional historical checks show sensitivity to the period and selected pairs.
+The engineering impact is a smaller screening workload and a complete, reproducible research process: training-only K-means screening, cointegration and recovery diagnostics, chronological signal generation, explicit two-leg accounting, and saved trade-level evidence.
+
+## Screening and engineering impact
+
+The official formation period, September 13, 2024–September 16, 2025, contained 499 eligible stocks from the 503-security universe. Unrestricted comparisons would require `499 × 498 / 2 = 124,251` pairs. K-means grouped the stocks into ten clusters, reducing the candidate family to **16,106 within-cluster tests**: **108,145 fewer comparisons, an 87.04% reduction**. This measures comparison count rather than elapsed runtime.
+
+The initial screen yielded 387 candidates. Persistence, recovery, and shared-stock filters retained three pairs, whose fixed weights fed the portfolio simulation. This creates a traceable path from a broad universe to specific trading decisions and their dollar outcomes.
+
+The default command reproduces the saved portfolio result without a new download. Frozen input hashes, saved selections, trade logs, 43 automated tests, and GitHub CI let reviewers inspect the calculations and repeat the result. Counts and source hashes are recorded in the [screening summary](../reports/screening-impact.json).
 
 ## Comparable saved evaluations
 
