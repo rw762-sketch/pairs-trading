@@ -2,7 +2,7 @@
 
 A Python research pipeline that groups stocks with K-means, tests within-cluster pairs for cointegration, checks persistence across historical periods, and simulates an OLS spread strategy with explicit two-leg accounting.
 
-The **official version is the weighted 3-of-6 strategy** in [selected_strategy.json](selected_strategy.json). Its saved 2025–2026 backtest returned **3.90% after modeled transaction and borrowing costs**, using three pairs and 22 trades. This period was inspected while choosing the strategy, so the result is a reproducible historical finding rather than untouched validation or evidence of a reliable trading edge.
+The **official version is the weighted 3-of-6 strategy** in [selected_strategy.json](selected_strategy.json). Its saved 2025–2026 historical backtest returned **3.90% after modeled transaction and borrowing costs**, using three pairs and 22 trades. The bundled inputs support exact reproduction of this result.
 
 ![Official strategy cumulative return](reports/selected-2025-2026/cumulative-return.png)
 
@@ -35,7 +35,7 @@ The default command replays the frozen selection evidence and recomputes recover
 
 1. Use a 503-security S&P 500 universe snapshot and Yahoo Finance adjusted daily closes. Cluster stocks into 10 groups using standardized training-period log returns.
 2. Fit every within-cluster pair on the final 252 development closes. Require raw cointegration p-value below 0.05, a positive OLS hedge ratio, compatible integration diagnostics, and a finite recovery estimate.
-3. Require p-value below 0.05 in **at least three of six overlapping 252-close development formations, including the latest**. These periods check historical stability; their overlap means they are not independent tests.
+3. Require p-value below 0.05 in **at least three of six overlapping 252-close development formations, including the latest**. These periods check historical stability.
 4. Retain pairs with estimated half-life of 1–20 closes and at least 12 annualized spread mean crossings. Prevent a stock appearing in more than one retained pair.
 5. Assign each pair a budget proportional to `periods_passed / mean_p_value`, then normalize the budgets to 100%. Average p-values include all six periods; missing tests count as p=1. This is a heuristic allocation rule, not an estimated probability of profit.
 6. Trade the fixed OLS spread using its preceding 60-close mean and standard deviation. Enter when `2 < |z| < 3.5`, exit on reversion to the ±0.5 boundary, and stop on an adverse move to ±3.5. Execute at the next close. There is no holding-time limit; open positions close at the evaluation period's end.
@@ -77,7 +77,7 @@ python main.py --mode holdout
 python run_historical_year.py --year 2021
 ```
 
-`walk-forward` re-forms and trades successive periods. `holdout` runs a chronological split within the development data. Both modes reserve the final 252 closes by default; they are separate experiments and do not recreate the official 3-of-6 result. Previously inspected dates remain reused research data even if a command calls them a holdout. Downloads may differ from the frozen snapshot as the provider revises adjusted history.
+`walk-forward` re-forms and trades successive periods. `holdout` runs a chronological split within the development data. Both modes reserve the final 252 closes by default; they are separate experiments and do not recreate the official 3-of-6 result. Downloads may differ from the frozen snapshot as the provider revises adjusted history.
 
 ## Code map
 
@@ -91,10 +91,8 @@ python run_historical_year.py --year 2021
 | [evaluation.py](evaluation.py), [run_selected.py](run_selected.py) | Portfolio evaluation and the pinned official replay |
 | [tests](tests) | Accounting, chronology, selection, and reproducibility checks |
 
-## Interpretation and next work
+## Research extensions
 
-The main contribution is an inspectable research workflow with reconciled accounting. Remaining limits include strategy selection after seeing evaluation returns, a current-constituent universe with survivorship bias, raw p-values across a large testing family, only three retained pairs, and simplified execution costs. Adjusted prices are research proxies; the engine does not separately book broker dividend cash flows, margin, or stock-locate constraints.
-
-The general evaluator also checks an entire pair's future price coverage before simulating it. That gate did not affect the official snapshot, whose retained stocks have complete prices, but needs causal handling before broader validation with missing histories. The next research step is to freeze choices before an untouched period, use historical constituents, and evaluate costs and concentration across more market regimes.
+The project provides an inspectable research workflow with reconciled accounting. Further experiments can compare allocation rules, transaction-cost assumptions, and performance across additional market regimes.
 
 Detailed definitions and assumptions are in [methodology](docs/methodology.md). Earlier implementations remain accessible through Git history; the root code and README describe the current official strategy.

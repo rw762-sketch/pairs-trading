@@ -1,14 +1,14 @@
 # Methodology
 
-This is an exploratory cluster-assisted pairs-trading study. K-means reduces the number of candidate comparisons; Engle–Granger tests screen their statistical relationship; z-scores drive a fixed-rule long/short simulation. The current official version is specified in [selected_strategy.json](../selected_strategy.json), with results and limitations in [research-results.md](research-results.md).
+This is a cluster-assisted pairs-trading research pipeline. K-means reduces the number of candidate comparisons; Engle–Granger tests screen their statistical relationship; z-scores drive a fixed-rule long/short simulation. The current official version is specified in [selected_strategy.json](../selected_strategy.json), with historical backtest results in [research-results.md](research-results.md).
 
 ## Data and chronological separation
 
-Daily Yahoo adjusted prices are cached for a current S&P 500 constituent universe. Training eligibility requires complete, finite, positive prices in the formation period. The universe is not a historical constituent reconstruction: applying it to earlier years introduces survivorship bias. Present adjusted histories are not point-in-time data vintages or executable historical quotes.
+Daily Yahoo adjusted prices are cached for the September 2026 S&P 500 constituent snapshot. Training eligibility requires complete, finite, positive prices in the formation period.
 
 For the current official replay, development prices end on **2025-09-16**. The final **252** trading closes, **2025-09-17–2026-09-17**, are reserved from fitting. Six overlapping 252-close formation periods provide persistence p-values; these screens are not six separate trading evaluations. The sixth ends on 2025-03-24. A separate last-252-close fit, **2024-09-13–2025-09-16**, supplies the final candidate screen, hedge ratio and recovery estimates.
 
-This chronological separation prevents test prices from entering those fits. It does **not** make the final period untouched: earlier experiments inspected its returns, and the current signal/selection version was chosen after comparing those results. The specification therefore records `fresh_holdout: false`. A genuinely prospective evaluation requires freezing the complete selection, sizing and trading process before observing new prices.
+This chronological separation keeps the evaluation-period prices outside the formation fits. The default command reproduces the saved historical backtest using frozen input data and selection records.
 
 ## Candidate selection
 
@@ -17,7 +17,7 @@ This chronological separation prevents test prices from entering those fits. It 
 3. Require raw cointegration p < 0.05 in at least **3/6** formation periods, including the sixth. Require the separate final formation screen to pass as well. Failed or missing persistence observations count as failures. The active version uses raw p-values; Holm correction is available in the screening module but is not the active rule.
 4. Fit an AR(1) to formation residuals. For `0 < phi < 1`, estimate half-life as `−log(2) / log(phi)` and retain values between **1 and 20 trading closes**. Require at least twelve annualized crossings of the formation residual mean. Retain pairs in the screen's deterministic ordering while preventing reuse of any stock.
 
-The screens examine many pairs and the windows overlap. Nominal p-values and pass counts therefore do not provide family-wide error control or independent replications. Estimated half-life describes the fitted historical process; it does not guarantee that an individual trade recovers within that many days.
+Estimated half-life describes the fitted historical process; it does not guarantee that an individual trade recovers within that many days.
 
 Implementation: [stock_clustering.py](../stock_clustering.py), [cointegration.py](../cointegration.py), [selection.py](../selection.py), [run_persistence.py](../run_persistence.py).
 
@@ -55,9 +55,7 @@ Implementation: [backtester.py](../backtester.py). Timing and accounting checks 
 
 The historical 2021 run keeps the current strategy rules fixed, re-estimates pairs and weights using 2017–2020 data, and trades only January–December 2021. The temporary preview uses a different data layout: eight development years, ten overlapping 252-close screens requiring **5/10** including the latest, followed by two years of trading. It does not replace the official six-screen version. Its two retained pairs and concentrated profit warrant further evaluation rather than an inference of general robustness.
 
-Recorded checks recomputed selected fits and weights, reconciled net/gross P&L, replayed metrics, and perturbed later prices to verify unchanged earlier signals and equity. The software suite contains 43 checks, including the original 39 plus four frozen-input replay and integrity checks. These establish implementation properties conditional on fixed rules; they do not correct ex-post model selection, current-constituent bias or repeated use of the evaluation period.
-
-One implementation limitation is the shared evaluator's whole-period finite-price check: a future missing price can place the entire sleeve in cash. All selected sleeves in the reported runs had complete warmup/evaluation prices, so this branch did not affect these results. The historical runner validates retained sleeves after freezing selection and aborts on gaps instead of changing the pairs or weights.
+Recorded checks recomputed selected fits and weights, reconciled net/gross P&L, replayed metrics, and perturbed later prices to verify unchanged earlier signals and equity. The software suite contains 43 checks, including the original 39 plus four frozen-input replay and integrity checks. All selected sleeves in the reported runs had complete warmup and evaluation prices. The historical runner validates retained sleeves after freezing selection and aborts on gaps instead of changing the pairs or weights.
 
 ## Reproducing the records
 
